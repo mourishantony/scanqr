@@ -112,55 +112,88 @@
                 document.getElementById('result').innerHTML = 'Not a LinkedIn profile QR.';
             }
         }
-        // Back camera only implementation
+        // Back camera only implementation (improved enumeration + fallback)
         const resultElem = document.getElementById('result');
         let html5qrInstance = null;
+        let lastError = null;
 
         function showError(msg) {
             resultElem.style.color = '#b00020';
-            resultElem.innerHTML = msg;
+            resultElem.innerHTML = msg + (lastError ? '<br><small style="opacity:.7">' + lastError + '</small>' : '');
         }
 
-        async function startBackCamera(explicitDeviceId) {
-            if (html5qrInstance) {
-                try { await html5qrInstance.stop(); } catch(e) {}
-                try { await html5qrInstance.clear(); } catch(e) {}
-            }
+        async function stopCurrent() {
+            if (!html5qrInstance) return;
+            try { await html5qrInstance.stop(); } catch(_) {}
+            try { await html5qrInstance.clear(); } catch(_) {}
+            html5qrInstance = null;
+        }
+
+        async function startWithDeviceId(deviceId) {
+            await stopCurrent();
             html5qrInstance = new Html5Qrcode('reader', { verbose:false });
-            const config = { fps:10, qrbox:{width:250,height:250} };
-            let constraints;
-            if (explicitDeviceId) {
-                constraints = { deviceId: { exact: explicitDeviceId } };
-            } else {
-                // Try ideal environment facing; if fails we'll enumerate and pick
-                constraints = { facingMode: { ideal: 'environment' } };
-            }
+            const config = { fps:10, qrbox:{ width:250, height:250 } };
+            await html5qrInstance.start(deviceId, config, onScanSuccess, () => {});
+            resultElem.style.color = '#000';
+            resultElem.innerHTML = 'Point the back camera at a LinkedIn QR code.';
+        }
+
+        async function pickAndStartBackCamera() {
+            lastError = null;
+            resultElem.innerHTML = 'Initializing camera...';
+            // Step 1: Try direct environment constraint (fast path)
             try {
-                await html5qrInstance.start(constraints, config, onScanSuccess, ()=>{});
+                await stopCurrent();
+                html5qrInstance = new Html5Qrcode('reader', { verbose:false });
+                await html5qrInstance.start({ facingMode: { ideal: 'environment' } }, { fps:10, qrbox:{width:250,height:250} }, onScanSuccess, () => {});
                 resultElem.style.color = '#000';
                 resultElem.innerHTML = 'Point the back camera at a LinkedIn QR code.';
-            } catch(err) {
-                if (!explicitDeviceId) {
-                    // Fallback: enumerate devices and choose a back one explicitly
-                    try {
-                        const cams = await Html5Qrcode.getCameras();
-                        if (cams.length === 0) return showError('No cameras found.');
-                        const back = cams.find(c => /back|rear|environment/i.test(c.label)) || cams[cams.length-1];
-                        return startBackCamera(back.id);
-                    } catch(e2) {
-                        showError('Unable to access camera: ' + (e2.message || e2));
-                    }
-                } else {
-                    showError('Could not start back camera: ' + (err.message || err));
+                return; // success
+            } catch(e1) {
+                lastError = e1 && e1.message ? e1.message : e1;
+                await stopCurrent();
+            }
+            // Step 2: Request broad permission (to reveal labels) then enumerate
+            try {
+                const tmp = await navigator.mediaDevices.getUserMedia({ video: true });
+                tmp.getTracks().forEach(t => t.stop());
+            } catch(_) { /* user might deny here; continue enumeration anyway */ }
+            try {
+                const cameras = await Html5Qrcode.getCameras();
+                if (!cameras.length) { showError('No cameras detected on this device.'); return; }
+                // Prefer labels with back/rear/environment, else last camera (often back on many devices)
+                let back = cameras.find(c => /back|rear|environment/i.test(c.label)) || cameras[cameras.length-1];
+                await startWithDeviceId(back.id);
+            } catch(e2) {
+                lastError = e2 && e2.message ? e2.message : e2;
+                // Step 3: Final fallback attempt with generic facingMode without ideal
+                try {
+                    await stopCurrent();
+                    html5qrInstance = new Html5Qrcode('reader', { verbose:false });
+                    await html5qrInstance.start({ facingMode: 'environment' }, { fps:10, qrbox:{width:250,height:250} }, onScanSuccess, () => {});
+                    resultElem.style.color = '#000';
+                    resultElem.innerHTML = 'Point the back camera at a LinkedIn QR code.';
+                } catch(e3) {
+                    lastError = (e3 && e3.message) || lastError || e3;
+                    showError('Unable to access camera:');
+                    addRetry();
                 }
             }
         }
 
-        // Request permission first to help some browsers resolve environment camera
-        (async () => {
-            try { await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } } }); } catch(e) {}
-            startBackCamera();
-        })();
+        function addRetry() {
+            if (document.getElementById('retry-btn')) return;
+            const btn = document.createElement('button');
+            btn.id = 'retry-btn';
+            btn.textContent = 'Retry Back Camera';
+            btn.style.marginTop = '12px';
+            btn.onclick = () => { lastError = null; pickAndStartBackCamera(); };
+            resultElem.appendChild(document.createElement('br'));
+            resultElem.appendChild(btn);
+        }
+
+        // Kick off
+        pickAndStartBackCamera();
     </script>
     <a href="/profiles" class="button">View All Scanned Profiles</a>
 </body>
