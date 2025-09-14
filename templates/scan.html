@@ -97,6 +97,8 @@
                 }).then(r => r.json()).then(data => {
                     if (data.status === 'success') {
                         document.getElementById('result').innerHTML += '<br>Profile saved!';
+                    } else if (data.status === 'duplicate') {
+                        document.getElementById('result').innerHTML += '<br>This profile is already saved.';
                     } else {
                         document.getElementById('result').innerHTML += '<br>Error saving profile.';
                     }

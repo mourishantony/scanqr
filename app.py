@@ -47,6 +47,10 @@ def add_profile():
     name = data.get('name')
     link = data.get('link')
     if name and link:
+        # Check for duplicate link
+        existing = Profile.query.filter_by(link=link).first()
+        if existing:
+            return {'status': 'duplicate'}, 200
         new_profile = Profile(name=name, link=link)
         db.session.add(new_profile)
         db.session.commit()
