@@ -60,12 +60,29 @@
             return url.startsWith('https://www.linkedin.com/in/');
         }
         function extractNameFromUrl(url) {
-            // LinkedIn profile URLs are like https://www.linkedin.com/in/username/
-            let parts = url.split('/');
-            let idx = parts.indexOf('in');
-            if (idx !== -1 && parts.length > idx+1) {
-                return decodeURIComponent(parts[idx+1].replace(/-/g, ' '));
-            }
+            // Expected: https://www.linkedin.com/in/first-last123?fromQR=1
+            try {
+                // Remove query/hash
+                let clean = url.split('?')[0].split('#')[0];
+                // Split path
+                let parts = clean.split('/').filter(Boolean); // remove empty
+                let inIndex = parts.indexOf('in');
+                if (inIndex !== -1 && parts.length > inIndex + 1) {
+                    let raw = decodeURIComponent(parts[inIndex + 1]);
+                    // Remove trailing slash if present
+                    raw = raw.replace(/\/$/, '');
+                    // Replace hyphens with spaces
+                    raw = raw.replace(/-/g, ' ');
+                    // Remove numeric suffixes (e.g., john-doe-1234 or john doe1911)
+                    raw = raw.replace(/\b(\d{2,})$/,'');
+                    raw = raw.replace(/\b(\d{2,})\b/g,'');
+                    // Collapse extra spaces
+                    raw = raw.replace(/\s+/g, ' ').trim();
+                    // Title case
+                    raw = raw.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+                    return raw || 'Unknown';
+                }
+            } catch(e) {}
             return 'Unknown';
         }
         function onScanSuccess(decodedText, decodedResult) {
@@ -92,22 +109,53 @@
                 document.getElementById('result').innerHTML = 'Not a LinkedIn profile QR.';
             }
         }
-        // Prefer back camera if available
-        function getDefaultCameraConfig() {
-            return {
+        // Camera selection logic
+        let html5QrcodeScanner;
+        let cameraId = null;
+        function startScanner(cameraId) {
+            if (html5QrcodeScanner) {
+                html5QrcodeScanner.clear();
+            }
+            const config = {
                 fps: 10,
                 qrbox: 250,
                 rememberLastUsedCamera: true,
                 supportedScanTypes: [Html5QrcodeScanType.SCAN_TYPE_CAMERA],
-                videoConstraints: {
-                    facingMode: { exact: "environment" }
-                }
+                videoConstraints: cameraId ? { deviceId: { exact: cameraId } } : {}
             };
+            html5QrcodeScanner = new Html5QrcodeScanner("reader", config);
+            html5QrcodeScanner.render(onScanSuccess);
         }
-        var html5QrcodeScanner = new Html5QrcodeScanner(
-            "reader", getDefaultCameraConfig()
-        );
-        html5QrcodeScanner.render(onScanSuccess);
+
+        // Populate camera selection dropdown
+        function setupCameraSelection() {
+            Html5Qrcode.getCameras().then(devices => {
+                if (devices && devices.length) {
+                    let select = document.createElement('select');
+                    select.id = 'camera-select';
+                    select.style.margin = '10px auto';
+                    select.style.display = 'block';
+                    devices.forEach(device => {
+                        let option = document.createElement('option');
+                        option.value = device.id;
+                        option.text = device.label || `Camera ${device.id}`;
+                        select.appendChild(option);
+                    });
+                    select.onchange = function() {
+                        cameraId = this.value;
+                        startScanner(cameraId);
+                    };
+                    document.body.insertBefore(select, document.getElementById('reader'));
+                    cameraId = select.value;
+                    startScanner(cameraId);
+                } else {
+                    startScanner();
+                }
+            }).catch(err => {
+                startScanner();
+            });
+        }
+        setupCameraSelection();
     </script>
     <a href="/profiles" class="button">View All Scanned Profiles</a>
 </body>

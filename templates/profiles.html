@@ -76,6 +76,36 @@
     </table>
     <a href="/" class="button">Back to Scanner</a>
     <br><br>
-    <a href="/download_db" class="button" download>Download Database</a>
+        <a href="/download_csv" class="button" download>Download as CSV</a>
+        <button class="button" id="delete-all-btn" style="background:#d9534f; margin-left: 10px; padding: 14px 28px;">Delete All Profiles</button>
+        <script>
+        const deleteBtn = document.getElementById('delete-all-btn');
+        deleteBtn.onclick = function() {
+            if (!confirm('Are you sure you want to delete all profiles? This cannot be undone.')) return;
+            deleteBtn.disabled = true;
+            deleteBtn.textContent = 'Deleting...';
+            fetch('/delete_all_profiles', {method: 'DELETE', headers: { 'Accept': 'application/json' }})
+                .then(async r => {
+                    let data;
+                    try { data = await r.json(); } catch(e) { throw new Error('Server did not return JSON (status '+r.status+').'); }
+                    if (!r.ok) throw new Error(data.error || ('HTTP '+r.status));
+                    return data;
+                })
+                .then(data => {
+                    if (data.status === 'success') {
+                        const table = document.querySelector('table');
+                        while (table.rows.length > 1) table.deleteRow(1);
+                        alert('All profiles deleted. ('+data.deleted+')');
+                    } else {
+                        alert('Error deleting profiles: ' + (data.error || 'Unknown error'));
+                    }
+                })
+                .catch(err => alert('Delete failed: ' + err.message))
+                .finally(() => {
+                    deleteBtn.disabled = false;
+                    deleteBtn.textContent = 'Delete All Profiles';
+                });
+        };
+        </script>
 </body>
 </html>
