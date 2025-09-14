@@ -53,6 +53,7 @@
 </head>
 <body>
     <h1>Scan LinkedIn Profile QR</h1>
+    <div id="camera-controls" style="max-width:400px;margin:0 auto;display:flex;gap:8px;justify-content:center;align-items:center;flex-wrap:wrap"></div>
     <div id="reader"></div>
     <div id="result"></div>
     <script>
@@ -109,53 +110,103 @@
                 document.getElementById('result').innerHTML = 'Not a LinkedIn profile QR.';
             }
         }
-        // Camera selection logic
-        let html5QrcodeScanner;
-        let cameraId = null;
-        function startScanner(cameraId) {
-            if (html5QrcodeScanner) {
-                html5QrcodeScanner.clear();
-            }
-            const config = {
-                fps: 10,
-                qrbox: 250,
-                rememberLastUsedCamera: true,
-                supportedScanTypes: [Html5QrcodeScanType.SCAN_TYPE_CAMERA],
-                videoConstraints: cameraId ? { deviceId: { exact: cameraId } } : {}
-            };
-            html5QrcodeScanner = new Html5QrcodeScanner("reader", config);
-            html5QrcodeScanner.render(onScanSuccess);
+        // Enhanced camera handling for mobile back camera selection
+        const readerElem = document.getElementById('reader');
+        const controls = document.getElementById('camera-controls');
+        const resultElem = document.getElementById('result');
+        let html5qr = null;
+        let currentCameraId = null;
+        let camerasList = [];
+
+        function showError(msg) {
+            resultElem.style.color = '#b00020';
+            resultElem.innerHTML = msg;
         }
 
-        // Populate camera selection dropdown
-        function setupCameraSelection() {
-            Html5Qrcode.getCameras().then(devices => {
-                if (devices && devices.length) {
-                    let select = document.createElement('select');
-                    select.id = 'camera-select';
-                    select.style.margin = '10px auto';
-                    select.style.display = 'block';
-                    devices.forEach(device => {
-                        let option = document.createElement('option');
-                        option.value = device.id;
-                        option.text = device.label || `Camera ${device.id}`;
-                        select.appendChild(option);
-                    });
-                    select.onchange = function() {
-                        cameraId = this.value;
-                        startScanner(cameraId);
-                    };
-                    document.body.insertBefore(select, document.getElementById('reader'));
-                    cameraId = select.value;
-                    startScanner(cameraId);
-                } else {
-                    startScanner();
-                }
-            }).catch(err => {
-                startScanner();
-            });
+        async function stopScanner() {
+            if (html5qr) {
+                try { await html5qr.stop(); } catch(e) {}
+                try { await html5qr.clear(); } catch(e) {}
+                html5qr = null;
+            }
         }
-        setupCameraSelection();
+
+        async function startWithCamera(id) {
+            await stopScanner();
+            currentCameraId = id;
+            html5qr = new Html5Qrcode('reader', { verbose: false });
+            const config = { fps: 10, qrbox: { width: 250, height: 250 } };
+            try {
+                await html5qr.start({ deviceId: { exact: id } }, config, onScanSuccess, (err)=>{});
+                resultElem.style.color = '#000';
+                resultElem.innerHTML = 'Point the camera at a LinkedIn QR code.';
+            } catch(e) {
+                showError('Could not start this camera: ' + e.message);
+            }
+        }
+
+        function buildCameraUI() {
+            controls.innerHTML = '';
+            // Dropdown
+            const select = document.createElement('select');
+            select.id = 'camera-select';
+            camerasList.forEach(c => {
+                const opt = document.createElement('option');
+                opt.value = c.id;
+                opt.textContent = c.label || 'Camera';
+                select.appendChild(opt);
+            });
+            select.onchange = () => startWithCamera(select.value);
+            controls.appendChild(select);
+            // Flip button (cycle)
+            if (camerasList.length > 1) {
+                const btn = document.createElement('button');
+                btn.textContent = 'Flip Camera';
+                btn.style.padding = '6px 12px';
+                btn.onclick = () => {
+                    let idx = camerasList.findIndex(c => c.id === currentCameraId);
+                    idx = (idx + 1) % camerasList.length;
+                    select.value = camerasList[idx].id;
+                    startWithCamera(camerasList[idx].id);
+                };
+                controls.appendChild(btn);
+            }
+        }
+
+        async function initScanner() {
+            try {
+                // Pre-request minimal permission to enumerate labels
+                await navigator.mediaDevices.getUserMedia({ video: true });
+            } catch(e) {
+                // Permission will be requested again by library; continue
+            }
+            try {
+                camerasList = await Html5Qrcode.getCameras();
+                if (!camerasList.length) {
+                    showError('No cameras found on this device.');
+                    return;
+                }
+                // Prefer back camera: look for labels containing back, rear, environment
+                let preferred = camerasList.find(c => /back|rear|environment/i.test(c.label)) || camerasList[0];
+                buildCameraUI();
+                document.getElementById('camera-select').value = preferred.id;
+                await startWithCamera(preferred.id);
+            } catch(err) {
+                if (err && err.name === 'NotReadableError') {
+                    showError('Camera is in use by another app. Close other apps (e.g. video calls, flashlight camera) and retry.');
+                } else if (err && err.name === 'NotAllowedError') {
+                    showError('Permission denied. Please allow camera access in your browser settings and refresh.');
+                } else {
+                    showError('Unable to access camera: ' + (err.message || err));
+                }
+                // Provide retry button
+                const retry = document.createElement('button');
+                retry.textContent = 'Retry Camera';
+                retry.onclick = () => { resultElem.innerHTML=''; initScanner(); };
+                controls.appendChild(retry);
+            }
+        }
+        initScanner();
     </script>
     <a href="/profiles" class="button">View All Scanned Profiles</a>
 </body>
