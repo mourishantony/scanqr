@@ -82,6 +82,10 @@
                     } else {
                         document.getElementById('result').innerHTML += '<br>Error saving profile.';
                     }
+                    // Wait 3 seconds, then redirect to home page
+                    setTimeout(function() {
+                        window.location.href = '/';
+                    }, 3000);
                 });
                 html5QrcodeScanner.clear();
             } else {
